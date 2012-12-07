@@ -2,7 +2,7 @@ package Earthquake::EEW::Decoder;
 
 use utf8;
 use vars qw($VERSION);
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 #電文種別
 my %code_type = (
@@ -123,14 +123,15 @@ my %rc2 = (
     '/' => '不明、未設定時、キャンセル時',
 );
 
+#到達判定
 my %ebiyy = (
     '00' => '未到達',
-    '01' => '既に到着と予想',
+    '01' => '既に到達と予想',
     '11' => '未定義',
     '//' => '不明',
 );
 
-#タイプ
+#発表情報種別
 my %warn_type = (
     'NCN'  => '高度利用者向け',
     'NPN'  => '一般向け',
@@ -144,6 +145,18 @@ my %warn_type = (
     'PPI'  => '強い揺れが推定される県',
     'PBI'  => '強い揺れが推定される地域',
 );
+
+#発表情報状況種別
+my %warn_state = (
+    '0' => '通常発表',
+    '6' => '情報内容訂正',
+    '7' => 'キャンセルを誤った場合の訂正',
+    '8' => '訂正事項を盛り込んだ最終の高度利用者向け緊急地震速報',
+    '9' => '最終の高度利用者向け緊急地震速報',
+    '/' => '未設定'
+);
+
+#震央コード(一般向け)
 my %ippan_shinou_code = (
     '0000' => '',
     '9011' => '北海道道央',
@@ -305,6 +318,8 @@ my %ippan_shinou_code = (
     '9911' => 'サハリン南部',
     '9912' => '朝鮮半島南部'
 );
+
+#震央コード
 my %shinou_code = (
     '000' => '',
     100   => '石狩支庁北部',
@@ -414,6 +429,7 @@ my %shinou_code = (
     370   => '新潟県上越地方',
     371   => '新潟県中越地方',
     372   => '新潟県下越地方',
+    375   => '新潟県佐渡地方',
     378   => '新潟県下越沖',
     379   => '新潟県上中越沖',
     380   => '富山県東部',
@@ -646,6 +662,7 @@ sub new {
     return bless {%conf}, $class;
 }
 
+#電文解析
 sub read_data {
     my ( $self, $str ) = @_;
     my $data;
@@ -660,22 +677,24 @@ sub read_data {
             $data->{'msg_type_code'}     = $3;
             $data->{'warn_time'}    = $4;
             $data->{'command_code'} = $5;
-	    $now_code='';
+        $now_code='';
         }
         elsif ( $line =~ /^(\d{12})/ ) {
             $data->{'eq_time'} = $1;
-	    $now_code='';
+        $now_code='';
         }
-        elsif ( $line =~ /ND(\d{14}) ([A-Z]+)(\d+)/ ) {
+        elsif ( $line =~ /ND(\d{14}) NCN(\d)(\d{2})/ ) {
             $data->{'eq_id'}     = $1;
-            $data->{'warn_type'} = $warn_type{$2};
-            $data->{'warn_code'} = $2;
+            $data->{'warn_type'} = $warn_type{'NCN'};
+            $data->{'warn_code'} = 'NCN';
+            $data->{'warn_state'} = $warn_state{$2};
+            $data->{'warn_state_code'} = $2;
+            $data->{'warn_num_str'} = $3;
             $data->{'warn_num'}  = $3 * 1;
-	    $now_code='';
+            
+        $now_code='';
         }
-        elsif ( $line
-            =~ /(\d{3}) N(\d{3}) E(\d{4}) (\d{3}) (\d{2}) ([0-9\-\+\/]{2}) RK.+/
-            )
+        elsif ( $line =~ /([0-9\/]{3}) [NS](\d{3}) [EW](\d{4}) ([0-9\/]{3}) ([0-9\/]{2}) ([0-9\-\+\/]{2}) RK.+/ )
         {
             $data->{'center_code'}  = $1;
             $data->{'center_name'}  = $shinou_code{$1};
@@ -685,55 +704,97 @@ sub read_data {
             $data->{'magnitude'}    = $5 / 10;
             $data->{'shindo'}       = $shindo{$6};
             $data->{'shindo_code'}  = $6;
-	    $now_code='';
+        $now_code='';
         }
-        elsif ( $line =~ /(\d{4}) N(\d{3}) E(\d{4}) (\d{3})/ ) {
+        elsif ( $line =~ /([0-9\/]{4}) [NS](\d{3}) [EW](\d{4}) ([0-9\/]{3})/ ) {
             $data->{'center_code'}  = $1;
             $data->{'center_name'}  = $ippan_shinou_code{$1};
             $data->{'center_lat'}   = $2 / 10;
             $data->{'center_lng'}   = $3 / 10;
             $data->{'center_depth'} = $4 * 1;
-	    $now_code='';
+        $now_code='';
         }
         elsif ( $line =~ /([CP][APB]I) ([0-9\s]+)/ ) {
-	    $now_code=$1;
+        $now_code=$1;
             foreach my $code ( split / /, $2 ) {
                 $data->{$now_code}->{$code}->{'name'} = $ippan_shinou_code{$code};
             }
         }
-        elsif ( $line
-            =~ /(\d{3}) S([0-9\-\+]{2})([0-9\-\+]{2}) ([0-9\/]{6}) ([0-9\/]{2}) (\d{3}) S([0-9\-\+]{2})([0-9\-\+]{2}) ([0-9\/]{6}) ([0-9\/]{2})/
-            )
+        elsif ( $line  =~ /(EBI |^)(\d{3}) S([0-9\-\+]{2})([0-9\-\+\/]{2}) ([\d|\/]{6}) (\d{2}) (\d{3}) S([0-9\-\+]{2})([0-9\-\+\/]{2}) ([\d|\/]{6}) (\d{2}) (\d{3}) S([0-9\-\+]{2})([0-9\-\+\/]{2}) ([\d|\/]{6}) (\d{2})/ )
         {
-	    $now_code='EBI';
+        $now_code='EBI';
 
-            $data->{'EBI'}->{$1}->{'name'}    = $shinou_code{$1};
-            $data->{'EBI'}->{$1}->{'shindo1'} = $shindo{$2};
-            $data->{'EBI'}->{$1}->{'shindo1_code'} = $2;
-            $data->{'EBI'}->{$1}->{'shindo2'} = $shindo{$3};
-            $data->{'EBI'}->{$1}->{'shindo2_code'} = $3;
-            $data->{'EBI'}->{$1}->{'time'}    = $4;
-            $data->{'EBI'}->{$1}->{'arrive'}  = $ebiyy{$5};
-            $data->{'EBI'}->{$1}->{'arrive_code'}  = $5;
+            $data->{'EBI'}->{$2}->{'name'}    = $shinou_code{$2};
+            $data->{'EBI'}->{$2}->{'shindo1'} = $shindo{$3};
+            $data->{'EBI'}->{$2}->{'shindo1_code'} = $3;
+            $data->{'EBI'}->{$2}->{'shindo2'} = $shindo{$4};
+            $data->{'EBI'}->{$2}->{'shindo2_code'} = $4;
+            $data->{'EBI'}->{$2}->{'time'}    = $5;
+            $data->{'EBI'}->{$2}->{'arrive'}  = $ebiyy{$6};
+            $data->{'EBI'}->{$2}->{'arrive_code'}  = $6;
 
-            $data->{'EBI'}->{$6}->{'name'}    = $shinou_code{$6};
-            $data->{'EBI'}->{$6}->{'shindo1'} = $shindo{$7};
-            $data->{'EBI'}->{$6}->{'shindo1_code'} = $7;
-            $data->{'EBI'}->{$6}->{'shindo2'} = $shindo{$8};
-            $data->{'EBI'}->{$6}->{'shindo2_code'} = $8;
-            $data->{'EBI'}->{$6}->{'time'}    = $9;
-            $data->{'EBI'}->{$6}->{'arrive'}  = $ebiyy{$10};
-            $data->{'EBI'}->{$6}->{'arrive_code'}  = $10;
+            $data->{'EBI'}->{$7}->{'name'}    = $shinou_code{$7};
+            $data->{'EBI'}->{$7}->{'shindo1'} = $shindo{$8};
+            $data->{'EBI'}->{$7}->{'shindo1_code'} = $8;
+            $data->{'EBI'}->{$7}->{'shindo2'} = $shindo{$9};
+            $data->{'EBI'}->{$7}->{'shindo2_code'} = $9;
+            $data->{'EBI'}->{$7}->{'time'}    = $10;
+            $data->{'EBI'}->{$7}->{'arrive'}  = $ebiyy{$11};
+            $data->{'EBI'}->{$7}->{'arrive_code'}  = $11;
+
+            $data->{'EBI'}->{$12}->{'name'}    = $shinou_code{$12};
+            $data->{'EBI'}->{$12}->{'shindo1'} = $shindo{$13};
+            $data->{'EBI'}->{$12}->{'shindo1_code'} = $13;
+            $data->{'EBI'}->{$12}->{'shindo2'} = $shindo{$14};
+            $data->{'EBI'}->{$12}->{'shindo2_code'} = $14;
+            $data->{'EBI'}->{$12}->{'time'}    = $15;
+            $data->{'EBI'}->{$12}->{'arrive'}  = $ebiyy{$16};
+            $data->{'EBI'}->{$12}->{'arrive_code'}  = $16;
         }
-	elsif ($now_code && $line=~/([0-9\s]+)/){
+        elsif ( $line =~ /(EBI |^)(\d{3}) S([0-9\-\+]{2})([0-9\-\+\/]{2}) ([\d|\/]{6}) (\d{2}) (\d{3}) S([0-9\-\+]{2})([0-9\-\+\/]{2}) ([\d|\/]{6}) (\d{2})/ )
+        {
+            $now_code='EBI';
+
+            $data->{'EBI'}->{$2}->{'name'}    = $shinou_code{$2};
+            $data->{'EBI'}->{$2}->{'shindo1'} = $shindo{$3};
+            $data->{'EBI'}->{$2}->{'shindo1_code'} = $3;
+            $data->{'EBI'}->{$2}->{'shindo2'} = $shindo{$4};
+            $data->{'EBI'}->{$2}->{'shindo2_code'} = $4;
+            $data->{'EBI'}->{$2}->{'time'}    = $5;
+            $data->{'EBI'}->{$2}->{'arrive'}  = $ebiyy{$6};
+            $data->{'EBI'}->{$2}->{'arrive_code'}  = $6;
+
+            $data->{'EBI'}->{$7}->{'name'}    = $shinou_code{$7};
+            $data->{'EBI'}->{$7}->{'shindo1'} = $shindo{$8};
+            $data->{'EBI'}->{$7}->{'shindo1_code'} = $8;
+            $data->{'EBI'}->{$7}->{'shindo2'} = $shindo{$9};
+            $data->{'EBI'}->{$7}->{'shindo2_code'} = $9;
+            $data->{'EBI'}->{$7}->{'time'}    = $10;
+            $data->{'EBI'}->{$7}->{'arrive'}  = $ebiyy{$11};
+            $data->{'EBI'}->{$7}->{'arrive_code'}  = $11;
+        }
+        elsif ( $line =~ /(EBI |^)(\d{3}) S([0-9\-\+]{2})([0-9\-\+\/]{2}) ([\d|\/]{6}) (\d{2})/ )
+        {
+            $now_code='EBI';
+
+            $data->{'EBI'}->{$2}->{'name'}    = $shinou_code{$2};
+            $data->{'EBI'}->{$2}->{'shindo1'} = $shindo{$3};
+            $data->{'EBI'}->{$2}->{'shindo1_code'} = $3;
+            $data->{'EBI'}->{$2}->{'shindo2'} = $shindo{$4};
+            $data->{'EBI'}->{$2}->{'shindo2_code'} = $4;
+            $data->{'EBI'}->{$2}->{'time'}    = $5;
+            $data->{'EBI'}->{$2}->{'arrive'}  = $ebiyy{$6};
+            $data->{'EBI'}->{$2}->{'arrive_code'}  = $6;
+        }
+        elsif ($now_code && $line=~/([0-9\s]+)/){
             foreach my $code ( split / /, $1 ) {
-		if($now_code=~/[PC]BI/){
-                   $data->{$now_code}->{$code}->{'name'} = $shinou_code{$code};
-	        }else{
-                   $data->{$now_code}->{$code}->{'name'} = $ippan_shinou_code{$code};
-		}
+                if($now_code =~ /[PC]BI/){
+                    $data->{$now_code}->{$code}->{'name'} = $ippan_shinou_code{$code};
+                } else {
+                    $data->{$now_code}->{$code}->{'name'} = $shinou_code{$code};
+                }
             }
-	}
+        }
     }
     return $data;
 }
@@ -747,7 +808,7 @@ Earthquake::EEW::Decoder - Perl extension for JMA Earthquake Early Warning data
 
 =head1 VERSION
 
-Version 0.03
+Version 0.05
 
 =head1 SYNOPSIS
 

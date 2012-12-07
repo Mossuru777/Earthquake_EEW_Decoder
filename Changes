@@ -12,3 +12,10 @@ Revision history for Perl extension Earthquake::EEW::Decoder.
 
 0.04  Tue Apr 12 2011
         - bugfix
+
+0.05  Sat Dec 08 2012
+        - bugfix
+        - add new sample script
+        - add shinou_code
+        - add some message
+       
