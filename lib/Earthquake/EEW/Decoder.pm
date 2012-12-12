@@ -2,7 +2,7 @@ package Earthquake::EEW::Decoder;
 
 use utf8;
 use vars qw($VERSION);
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 #電文種別
 my %code_type = (
@@ -694,24 +694,40 @@ sub read_data {
             
         $now_code='';
         }
-        elsif ( $line =~ /([0-9\/]{3}) [NS](\d{3}) [EW](\d{4}) ([0-9\/]{3}) ([0-9\/]{2}) ([0-9\-\+\/]{2}) RK.+/ )
+        elsif ( $line =~ /([0-9\/]{3}) ([NS])(\d{3}) ([EW])(\d{4}) ([0-9\/]{3}) ([0-9\/]{2}) ([0-9\-\+\/]{2}) RK.+/ )
         {
             $data->{'center_code'}  = $1;
             $data->{'center_name'}  = $shinou_code{$1};
-            $data->{'center_lat'}   = $2 / 10;
-            $data->{'center_lng'}   = $3 / 10;
-            $data->{'center_depth'} = $4 * 1;
-            $data->{'magnitude'}    = $5 / 10;
-            $data->{'shindo'}       = $shindo{$6};
-            $data->{'shindo_code'}  = $6;
+            if($2 eq "N"){
+                $data->{'center_lat'}   = "+" . $3 / 10;
+            } else {
+                $data->{'center_lat'}   = "-" . $3 / 10;
+            }
+            if($4 eq "E"){
+                $data->{'center_lng'}   = "+" . $5 / 10;
+            } else {
+                $data->{'center_lng'}   = "-" . $5 / 10;
+            }
+            $data->{'center_depth'} = $6 * 1;
+            $data->{'magnitude'}    = $7 / 10;
+            $data->{'shindo'}       = $shindo{$8};
+            $data->{'shindo_code'}  = $8;
         $now_code='';
         }
-        elsif ( $line =~ /([0-9\/]{4}) [NS](\d{3}) [EW](\d{4}) ([0-9\/]{3})/ ) {
+        elsif ( $line =~ /([0-9\/]{4}) ([NS])(\d{3}) ([EW])(\d{4}) ([0-9\/]{3})/ ) {
             $data->{'center_code'}  = $1;
             $data->{'center_name'}  = $ippan_shinou_code{$1};
-            $data->{'center_lat'}   = $2 / 10;
-            $data->{'center_lng'}   = $3 / 10;
-            $data->{'center_depth'} = $4 * 1;
+            if($2 eq "N"){
+                $data->{'center_lat'}   = "+" . $3 / 10;
+            } else {
+                $data->{'center_lat'}   = "-" . $3 / 10;
+            }
+            if($4 eq "E"){
+                $data->{'center_lng'}   = "+" . $5 / 10;
+            } else {
+                $data->{'center_lng'}   = "-" . $5 / 10;
+            }
+            $data->{'center_depth'} = $6 * 1;
         $now_code='';
         }
         elsif ( $line =~ /([CP][APB]I) ([0-9\s]+)/ ) {

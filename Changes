@@ -18,4 +18,9 @@ Revision history for Perl extension Earthquake::EEW::Decoder.
         - add new sample script
         - add shinou_code
         - add some message
-       
+
+0.06  Thu Dec 13 2012
+        - bugfix
+        - add the pole to latitude/longitude data
+          (North and East is '+', South and West is '-')
+        - add epicenter position data to tweet in sample program 'eew_alerter.pl'

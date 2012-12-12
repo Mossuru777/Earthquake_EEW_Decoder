@@ -55,7 +55,7 @@ my $AppVer     = '2.4.2';
 my $PASS_md5 = md5_hex($PASS);
 my $dt       = DateTime->now;
 my $now      = $dt->strftime("%Y/%m/%d %H:%M:%S.%6N");
-my $eew = Earthquake::EEW::JMADecoder->new();
+my $eew = Earthquake::EEW::Decoder->new();
 my $udp = IO::Socket::Multicast->new();
    $udp->mcast_dest($udp_broadcast_group_and_port);
 my $format = DateTime::Format::Strptime->new(
@@ -77,13 +77,20 @@ if(defined($ARGV[0]) && -f $ARGV[0]){
 
     my $d = $eew->read_data($filedata);
     my @message = &makeMessage($d);
-    $udp->mcast_send(encode('utf-8', $message[0] . $message[1]));
-    sendtoKayac($message[0] . $message[1]);
+    
+    # UDP Multicast
+    $udp->mcast_send(encode('utf-8', $message[0] . $message[1])) if( $udp_broadcast_group_and_port );
+    
+    # Send to Kayac
+    sendtoKayac($message[0] . $message[1]) if( $im_kayac_user && $im_kayac_url );
 
     exit(0);
 } elsif(defined($ARGV[0])){
     exit(1);
 }
+
+# WNI ユーザー確認
+if( !$USER || !$PASS ) exit(1);
 
 # ログディレクトリ準備
 if(!-e $logfolder){
@@ -99,8 +106,6 @@ $SIG{'TERM'} = 'EndWarning';
 
 #タイムアウト時のシグナルによる再接続処理
 $SIG{'ALRM'} = 'Timeout';
-
-#$udp->mcast_send(encode('utf-8', "緊急地震速報受信サービス 起動しました。"));
 
 
 WNI_INIT:
@@ -139,12 +144,12 @@ my $data_length = 0;
 my $LAST_ID_NUM = '';
 my $fh;
 
-$udp->mcast_send(encode('utf-8', "緊急地震速報の受信待機を開始しました。"));
-sendtoKayac("緊急地震速報の受信待機を開始しました。");
+$udp->mcast_send(encode('utf-8', "緊急地震速報の受信待機を開始しました。")) if( $udp_broadcast_group_and_port );
+sendtoKayac("緊急地震速報の受信待機を開始しました。") if( $im_kayac_user && $im_kayac_url );
 
 while ( my $buf = <$socket> ) {
-    alarm 0; #WatchDogTimer Cancel
-    #KeepAlive 受信
+    alarm 0; # WatchDogTimer Cancel
+    # KeepAlive 受信
     if ( $buf =~ /GET \/ HTTP\/1.1/ ) {
         my $dt       = DateTime->now;
         my $now      = $dt->strftime("%Y/%m/%d %H:%M:%S.%6N");
@@ -163,11 +168,11 @@ while ( my $buf = <$socket> ) {
         $PP          = 1;
         $data_length = 0;
     }
-    #データ長受信
+    # データ長受信
     elsif ( $buf =~ /^Content-Length: (\d+)/ ) {
         $data_length = $1;
     }
-    #EEW データ受信
+    # EEW データ受信
     elsif ( $buf =~ /^[\r\n]+$/ ) {
         $PP = 0;
         if ($data_length) {
@@ -177,10 +182,17 @@ while ( my $buf = <$socket> ) {
             my $d = $eew->read_data($data);
             my @message = &makeMessage($d);
 
-            $udp->mcast_send(encode('utf-8', $message[0] . $message[1]));
-            sendtoKayac($message[0] . $message[1]);
-            $nt->update($message[1]);
-            $nt->update($message[0]) if($message[0]);
+            # UDP Multicast
+            $udp->mcast_send(encode('utf-8', $message[0] . $message[1])) if( $udp_broadcast_group_and_port );
+
+            # Send to Kayac
+            sendtoKayac($message[0] . $message[1]) if( $im_kayac_user && $im_kayac_url );
+
+            # Tweet
+            if( $consumer_key && $consumer_secret && $access_token && $access_token_secret ){
+                $nt->update($message[1], $d->{'center_lat'}, $d->{'center_lng'});
+                $nt->update($message[0]) if($message[0]);
+            }
             
             my $format = DateTime::Format::Strptime->new(
                        time_zone => 'JST-9',
@@ -193,11 +205,10 @@ while ( my $buf = <$socket> ) {
                 print $fh $data;
                 close($fh);
             }
-            #print $message . "\n";
         }
         $data_length = 0;
     }
-    #接続試行時の結果受信
+    # 接続試行時の結果受信
     elsif ( $buf =~ /X-WNI-Result: (.+)$/ ) {
         print $1,"\n";
     }
@@ -209,8 +220,8 @@ while ( my $buf = <$socket> ) {
         print $PP, ':', $buf;
         chomp $buf;
     }
-    #WatchDogTimer Set
-    alarm 300; #5 minutes
+    # WatchDogTimer Set
+    alarm 300; # 5 minutes
 }
 alarm 0;
 
@@ -218,8 +229,8 @@ if($socket){
     $socket->close();
 }
 
-$udp->mcast_send(encode('utf-8', "緊急地震速報が受信できない状態です。\nサーバーへの接続を再試行します。"));
-sendtoKayac("緊急地震速報が受信できない状態です。\nサーバーへの接続を再試行します。");
+$udp->mcast_send(encode('utf-8', "緊急地震速報が受信できない状態です。\nサーバーへの接続を再試行します。")) if( $udp_broadcast_group_and_port );
+sendtoKayac("緊急地震速報が受信できない状態です。\nサーバーへの接続を再試行します。") if( $im_kayac_user && $im_kayac_url );
 
 goto WNI_INIT;
 exit 255;
@@ -340,8 +351,8 @@ sub sendtoKayac {
 }
 
 sub EndWarning {
-    $udp->mcast_send(encode('utf-8', "緊急地震速報受信サービス 停止しました。"));
-    sendtoKayac("緊急地震速報受信サービス 停止しました。");
+    $udp->mcast_send(encode('utf-8', "緊急地震速報受信サービス 停止しました。")) if( $udp_broadcast_group_and_port );
+    sendtoKayac("緊急地震速報受信サービス 停止しました。") if( $im_kayac_user && $im_kayac_url );
     $socket->close();
     exit 255;
 }
